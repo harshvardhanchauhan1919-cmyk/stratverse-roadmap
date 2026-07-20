@@ -15,7 +15,6 @@ export interface Project {
   color: string;
   startDate: string | null;
   targetDate: string | null;
-  state: string | null;
   milestones: Milestone[];
 }
 
@@ -37,7 +36,6 @@ query Roadmap($teamId: String!) {
         color
         startDate
         targetDate
-        state
         projectMilestones(first: 100) {
           nodes { id name targetDate sortOrder }
         }
@@ -66,7 +64,10 @@ export async function getRoadmap(): Promise<Roadmap> {
   });
 
   if (!res.ok) {
-    throw new Error(`Linear API returned ${res.status} ${res.statusText}`);
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Linear API returned ${res.status} ${res.statusText}. ${body.slice(0, 300)}`
+    );
   }
 
   const json: any = await res.json();
@@ -81,7 +82,6 @@ export async function getRoadmap(): Promise<Roadmap> {
     color: p.color || "#4472C4",
     startDate: p.startDate ?? null,
     targetDate: p.targetDate ?? null,
-    state: p.state ?? null,
     milestones: (p.projectMilestones?.nodes || [])
       .map((m: any) => ({
         id: m.id,
