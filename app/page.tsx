@@ -11,7 +11,7 @@ const BASE = baselineData as {
   milestones: Record<string, string>;
 };
 
-const LABEL_W = 250;
+const LABEL_W = 300;
 const ROW_H = 40;
 const MS_DAY = 86400000;
 
@@ -231,6 +231,7 @@ function TrackRow({
   const cs = pct(current.s.getTime());
   const cw = Math.max(1.2, pct(current.e.getTime()) - cs);
   const pctDone = Math.round(progress * 100);
+  const totalDays = daysBetween(current.s, current.e);
   return (
     <div style={{ display: "flex", alignItems: "center", borderTop: "1px solid #f1f2f4" }}>
       <div style={{ width: LABEL_W, flexShrink: 0, padding: "5px 12px 5px 0" }}>
@@ -246,7 +247,10 @@ function TrackRow({
             flexWrap: "wrap",
           }}
         >
-          <span>{fmt(current.e)}</span>
+          <span>
+            {fmt(current.s)} – {fmt(current.e)}
+          </span>
+          <span style={{ color: "#374151" }}>{totalDays}d</span>
           <span style={{ color: "#111827", fontWeight: 600 }}>{pctDone}%</span>
           <DriftChip drift={drift} />
         </div>
@@ -276,8 +280,8 @@ function TrackRow({
               width: `${Math.max(1.2, pct(planned.e.getTime()) - pct(planned.s.getTime()))}%`,
               top: 6,
               height: 6,
-              background: "#9ca3af",
-              opacity: 0.55,
+              background: "#6b7280",
+              opacity: 0.85,
               borderRadius: 3,
             }}
           />
@@ -337,7 +341,7 @@ function Legend({ baselineDate }: { baselineDate: string }) {
       }}
     >
       {item(
-        <span style={{ width: 22, height: 6, background: "#9ca3af", opacity: 0.6, borderRadius: 3 }} />,
+        <span style={{ width: 22, height: 6, background: "#6b7280", opacity: 0.85, borderRadius: 3 }} />,
         `Planned (baseline, ${baselineDate})`
       )}
       {item(
