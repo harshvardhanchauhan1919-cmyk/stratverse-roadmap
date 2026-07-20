@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { getRoadmap, type Project, type Roadmap } from "@/lib/linear";
 
-// Re-render (revalidate) at most every 5 minutes; edits in Linear show up within that window.
-export const revalidate = 300;
+// Render on every request so a refresh always reflects the latest Linear dates.
+export const dynamic = "force-dynamic";
 
 const LABEL_W = 240;
 

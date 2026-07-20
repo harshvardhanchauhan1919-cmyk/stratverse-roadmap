@@ -59,8 +59,8 @@ export async function getRoadmap(): Promise<Roadmap> {
       Authorization: key, // personal API keys are passed directly, no "Bearer"
     },
     body: JSON.stringify({ query: QUERY, variables: { teamId: TEAM_ID } }),
-    // Cache the upstream response for 5 minutes so heavy traffic does not hammer Linear.
-    next: { revalidate: 300 },
+    // Always fetch fresh from Linear so a page refresh shows the latest dates.
+    cache: "no-store",
   });
 
   if (!res.ok) {
