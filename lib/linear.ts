@@ -29,14 +29,14 @@ const QUERY = `
 query Roadmap($teamId: String!) {
   team(id: $teamId) {
     name
-    projects(first: 100) {
+    projects(first: 50) {
       nodes {
         id
         name
         color
         startDate
         targetDate
-        projectMilestones(first: 100) {
+        projectMilestones(first: 20) {
           nodes { id name targetDate sortOrder }
         }
       }
