@@ -1,0 +1,29 @@
+{
+  "frozenOn": "2026-07-20",
+  "note": "Planned 'finish by 9 Oct 2026' schedule, frozen as the baseline for planned-vs-actual. Live Linear dates are compared against this.",
+  "projects": {
+    "21bd955f-95ec-43aa-a169-0268a30623af": { "startDate": "2026-07-27", "targetDate": "2026-09-04" },
+    "55306f55-336f-4ec0-9569-bb78a0464087": { "startDate": "2026-08-24", "targetDate": "2026-09-18" },
+    "d901d651-e140-4675-9e12-5b4c81ca2eeb": { "startDate": "2026-09-14", "targetDate": "2026-10-09" },
+    "c7ffa649-3eca-4963-8b37-e87a14d7139f": { "startDate": "2026-09-21", "targetDate": "2026-10-09" }
+  },
+  "milestones": {
+    "e4ddc2b6-6ee3-4213-a2b1-b7711a22c73b": "2026-08-01",
+    "fa1a65f3-0fb1-4ed8-b9a0-c7f594b1eb7f": "2026-08-08",
+    "417ee812-53b3-4180-bcc3-f46749197027": "2026-08-15",
+    "af2ba991-b39e-4855-8563-4a3c75ec83e4": "2026-08-22",
+    "684cf781-434a-468d-95a9-5b90b46eddc8": "2026-08-29",
+    "1d69f7e7-bb7d-4b90-bf55-ef1c98bdc94f": "2026-09-04",
+    "55fb45f5-0dbf-456c-8836-df9fa3e99786": "2026-08-28",
+    "a63c973c-fb07-4625-989c-bf4c3c679072": "2026-09-04",
+    "a0a6b8c4-aa03-4d6d-ae0b-475e04494684": "2026-09-11",
+    "994ef3b2-2f66-4960-aad8-0db00970a370": "2026-09-18",
+    "39ced746-ab4d-4c30-9133-23ed3d731e19": "2026-09-18",
+    "1af83e10-0c00-48da-a996-7fbabc2a0b32": "2026-09-25",
+    "ff9edec9-b894-4e7d-83b8-920d18c7fc22": "2026-10-02",
+    "d0bce545-0d8d-4232-ba29-c4249e9752b3": "2026-10-09",
+    "b5a08e7f-8b99-40a4-93fe-000eecce9a8b": "2026-09-25",
+    "e79c145b-d294-4228-8e7d-38214d6c17dc": "2026-10-02",
+    "4a51defa-ea43-4cff-941f-d49585884cf0": "2026-10-09"
+  }
+}

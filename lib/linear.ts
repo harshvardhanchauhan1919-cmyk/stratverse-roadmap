@@ -7,6 +7,7 @@ export interface Milestone {
   name: string;
   targetDate: string | null;
   sortOrder: number;
+  progress: number;
 }
 
 export interface Project {
@@ -15,6 +16,7 @@ export interface Project {
   color: string;
   startDate: string | null;
   targetDate: string | null;
+  progress: number;
   milestones: Milestone[];
 }
 
@@ -36,8 +38,9 @@ query Roadmap($teamId: String!) {
         color
         startDate
         targetDate
+        progress
         projectMilestones(first: 20) {
-          nodes { id name targetDate sortOrder }
+          nodes { id name targetDate sortOrder progress }
         }
       }
     }
@@ -82,12 +85,14 @@ export async function getRoadmap(): Promise<Roadmap> {
     color: p.color || "#4472C4",
     startDate: p.startDate ?? null,
     targetDate: p.targetDate ?? null,
+    progress: p.progress ?? 0,
     milestones: (p.projectMilestones?.nodes || [])
       .map((m: any) => ({
         id: m.id,
         name: m.name,
         targetDate: m.targetDate ?? null,
         sortOrder: m.sortOrder ?? 0,
+        progress: m.progress ?? 0,
       }))
       .sort((a: Milestone, b: Milestone) => a.sortOrder - b.sortOrder),
   }));

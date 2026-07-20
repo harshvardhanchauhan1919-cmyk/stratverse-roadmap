@@ -1,12 +1,21 @@
 import type { ReactNode } from "react";
 import { getRoadmap, type Project, type Roadmap } from "@/lib/linear";
+import baselineData from "@/baseline.json";
 
 // Render on every request so a refresh always reflects the latest Linear dates.
 export const dynamic = "force-dynamic";
 
-const LABEL_W = 240;
+const BASE = baselineData as {
+  frozenOn: string;
+  projects: Record<string, { startDate: string; targetDate: string }>;
+  milestones: Record<string, string>;
+};
 
-function parse(d: string | null): Date | null {
+const LABEL_W = 250;
+const ROW_H = 40;
+const MS_DAY = 86400000;
+
+function parse(d: string | null | undefined): Date | null {
   return d ? new Date(d + "T00:00:00") : null;
 }
 function fmt(d: Date): string {
@@ -17,6 +26,14 @@ function sundayOnOrBefore(d: Date): Date {
   x.setDate(x.getDate() - x.getDay());
   x.setHours(0, 0, 0, 0);
   return x;
+}
+function norm(v: number | null | undefined): number {
+  if (!v) return 0;
+  const f = v > 1 ? v / 100 : v; // Linear returns 0..1; guard percentages too
+  return Math.max(0, Math.min(1, f));
+}
+function daysBetween(a: Date, b: Date): number {
+  return Math.round((b.getTime() - a.getTime()) / MS_DAY);
 }
 
 export default async function Page() {
@@ -43,10 +60,6 @@ export default async function Page() {
         >
           <strong>Couldn&apos;t load data from Linear.</strong>
           <div style={{ marginTop: 8, fontSize: 13 }}>{error}</div>
-          <div style={{ marginTop: 10, fontSize: 13, color: "#7f1d1d" }}>
-            Make sure <code>LINEAR_API_KEY</code> is set in Vercel &rarr; Project &rarr; Settings
-            &rarr; Environment Variables, then redeploy.
-          </div>
         </div>
       </main>
     );
@@ -54,28 +67,38 @@ export default async function Page() {
 
   const projects = data.projects;
 
-  // Compute the overall date range across projects + milestones.
+  // Date range across BOTH baseline and live dates.
   const times: number[] = [];
   for (const p of projects) {
-    const s = parse(p.startDate);
-    const t = parse(p.targetDate);
-    if (s) times.push(s.getTime());
-    if (t) times.push(t.getTime());
+    [parse(p.startDate), parse(p.targetDate)].forEach((d) => d && times.push(d.getTime()));
+    const b = BASE.projects[p.id];
+    if (b) {
+      const bs = parse(b.startDate);
+      const bt = parse(b.targetDate);
+      if (bs) times.push(bs.getTime());
+      if (bt) times.push(bt.getTime());
+    }
     for (const m of p.milestones) {
       const md = parse(m.targetDate);
       if (md) times.push(md.getTime());
+      const bm = parse(BASE.milestones[m.id]);
+      if (bm) times.push(bm.getTime());
     }
   }
   const minRaw = new Date(Math.min(...times));
   const maxRaw = new Date(Math.max(...times));
   const start = sundayOnOrBefore(minRaw);
   const end = new Date(maxRaw);
-  end.setDate(end.getDate() + (6 - end.getDay()) + 1); // pad to end of the last week
+  end.setDate(end.getDate() + (6 - end.getDay()) + 1);
   const span = end.getTime() - start.getTime();
   const pct = (t: number) => Math.max(0, Math.min(100, ((t - start.getTime()) / span) * 100));
 
   const weeks: Date[] = [];
   for (let d = new Date(start); d < end; d.setDate(d.getDate() + 7)) weeks.push(new Date(d));
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayPct = pct(today.getTime());
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 20px 60px" }}>
@@ -92,58 +115,36 @@ export default async function Page() {
           Stratverse Portals — Build Roadmap
         </h1>
         <div style={{ fontSize: 12, color: "#6b7280" }}>
-          Live from Linear · auto-refreshes ~5 min · loaded{" "}
-          {new Date().toLocaleString("en-GB", { timeZone: "UTC" })} UTC
+          Live from Linear · refreshes on load · {new Date().toLocaleString("en-GB", { timeZone: "UTC" })} UTC
         </div>
       </div>
-      <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 700, margin: "6px 0 22px" }}>
+      <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 700, margin: "6px 0 12px" }}>
         Overall finish target: {fmt(maxRaw)} 2026
       </div>
 
+      <Legend baselineDate={BASE.frozenOn} />
+
       <Section title="Master Roadmap">
-        <Grid weeks={weeks} pct={pct}>
+        <Grid weeks={weeks} pct={pct} todayPct={todayPct}>
           {projects.map((p) => {
-            const s = parse(p.startDate) || parse(p.targetDate)!;
-            const t = parse(p.targetDate) || parse(p.startDate)!;
-            const left = pct(s.getTime());
-            const width = Math.max(1.5, pct(t.getTime()) - left);
+            const b = BASE.projects[p.id];
+            const curS = parse(p.startDate) || parse(p.targetDate)!;
+            const curE = parse(p.targetDate) || parse(p.startDate)!;
+            const baseS = b ? parse(b.startDate) : null;
+            const baseE = b ? parse(b.targetDate) : null;
+            const drift = baseE && curE ? daysBetween(baseE, curE) : 0;
             return (
-              <Row key={p.id} label={p.name} sub={`${fmt(s)} – ${fmt(t)}`}>
-                <div
-                  title={`${p.name}: ${fmt(s)} – ${fmt(t)}`}
-                  style={{
-                    position: "absolute",
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    top: 8,
-                    height: 18,
-                    background: p.color,
-                    borderRadius: 5,
-                    opacity: 0.92,
-                  }}
-                />
-                {p.milestones.map((m) => {
-                  const md = parse(m.targetDate);
-                  if (!md) return null;
-                  return (
-                    <div
-                      key={m.id}
-                      title={`${m.name} · ${fmt(md)}`}
-                      style={{
-                        position: "absolute",
-                        left: `${pct(md.getTime())}%`,
-                        top: 10,
-                        transform: "translateX(-50%)",
-                        width: 9,
-                        height: 9,
-                        background: "#fff",
-                        border: `2px solid ${p.color}`,
-                        borderRadius: "50%",
-                      }}
-                    />
-                  );
-                })}
-              </Row>
+              <TrackRow
+                key={p.id}
+                label={p.name}
+                color={p.color}
+                planned={baseS && baseE ? { s: baseS, e: baseE } : null}
+                current={{ s: curS, e: curE }}
+                progress={norm(p.progress)}
+                drift={drift}
+                pct={pct}
+                todayPct={todayPct}
+              />
             );
           })}
         </Grid>
@@ -151,37 +152,39 @@ export default async function Page() {
 
       {projects.map((p) => (
         <Section key={p.id} title={p.name} color={p.color}>
-          <Grid weeks={weeks} pct={pct}>
+          <Grid weeks={weeks} pct={pct} todayPct={todayPct}>
             {p.milestones.length === 0 && (
               <div style={{ fontSize: 12, color: "#9ca3af", padding: "8px 0" }}>
                 No milestones with dates.
               </div>
             )}
             {p.milestones.map((m, i) => {
-              const md = parse(m.targetDate);
-              if (!md) return null;
-              const prev =
+              const curE = parse(m.targetDate);
+              if (!curE) return null;
+              const curS =
                 i === 0
-                  ? parse(p.startDate) || md
-                  : parse(p.milestones[i - 1].targetDate) || md;
-              const left = pct(prev.getTime());
-              const width = Math.max(1.5, pct(md.getTime()) - left);
+                  ? parse(p.startDate) || curE
+                  : parse(p.milestones[i - 1].targetDate) || curE;
+
+              const baseE = parse(BASE.milestones[m.id]);
+              const baseS =
+                i === 0
+                  ? parse(BASE.projects[p.id]?.startDate)
+                  : parse(BASE.milestones[p.milestones[i - 1].id]);
+
+              const drift = baseE ? daysBetween(baseE, curE) : 0;
               return (
-                <Row key={m.id} label={m.name} sub={fmt(md)}>
-                  <div
-                    title={`${m.name} → ${fmt(md)}`}
-                    style={{
-                      position: "absolute",
-                      left: `${left}%`,
-                      width: `${width}%`,
-                      top: 8,
-                      height: 18,
-                      background: p.color,
-                      borderRadius: 5,
-                      opacity: i % 2 === 0 ? 0.9 : 0.6,
-                    }}
-                  />
-                </Row>
+                <TrackRow
+                  key={m.id}
+                  label={m.name}
+                  color={p.color}
+                  planned={baseS && baseE ? { s: baseS, e: baseE } : null}
+                  current={{ s: curS, e: curE }}
+                  progress={norm(m.progress)}
+                  drift={drift}
+                  pct={pct}
+                  todayPct={todayPct}
+                />
               );
             })}
           </Grid>
@@ -189,10 +192,165 @@ export default async function Page() {
       ))}
 
       <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 26 }}>
-        Dates are read live from Linear project &amp; milestone targets. Change a date in Linear and
-        this page reflects it within ~5 minutes (or on the next deploy).
+        Planned = frozen baseline ({fmt(parse(BASE.frozenOn)!)} 2026). Current = live Linear dates.
+        Fill = % complete (from Linear). Edit dates or progress in Linear and refresh to update.
       </div>
     </main>
+  );
+}
+
+function DriftChip({ drift }: { drift: number }) {
+  if (!drift) return <span style={{ color: "#16a34a", fontWeight: 600 }}>on plan</span>;
+  const late = drift > 0;
+  return (
+    <span style={{ color: late ? "#dc2626" : "#16a34a", fontWeight: 600 }}>
+      {late ? `+${drift}d late` : `${Math.abs(drift)}d early`}
+    </span>
+  );
+}
+
+function TrackRow({
+  label,
+  color,
+  planned,
+  current,
+  progress,
+  drift,
+  pct,
+  todayPct,
+}: {
+  label: string;
+  color: string;
+  planned: { s: Date; e: Date } | null;
+  current: { s: Date; e: Date };
+  progress: number;
+  drift: number;
+  pct: (t: number) => number;
+  todayPct: number;
+}) {
+  const cs = pct(current.s.getTime());
+  const cw = Math.max(1.2, pct(current.e.getTime()) - cs);
+  const pctDone = Math.round(progress * 100);
+  return (
+    <div style={{ display: "flex", alignItems: "center", borderTop: "1px solid #f1f2f4" }}>
+      <div style={{ width: LABEL_W, flexShrink: 0, padding: "5px 12px 5px 0" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25 }}>{label}</div>
+        <div
+          style={{
+            fontSize: 10,
+            color: "#9ca3af",
+            marginTop: 1,
+            display: "flex",
+            gap: 7,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <span>{fmt(current.e)}</span>
+          <span style={{ color: "#111827", fontWeight: 600 }}>{pctDone}%</span>
+          <DriftChip drift={drift} />
+        </div>
+      </div>
+      <div style={{ position: "relative", flex: 1, height: ROW_H }}>
+        {/* Today line */}
+        <div
+          title="Today"
+          style={{
+            position: "absolute",
+            left: `${todayPct}%`,
+            top: 0,
+            height: ROW_H,
+            width: 2,
+            background: "#ef4444",
+            opacity: 0.6,
+            zIndex: 3,
+          }}
+        />
+        {/* Planned (baseline) — thin grey bar */}
+        {planned && (
+          <div
+            title={`Planned: ${fmt(planned.s)} – ${fmt(planned.e)}`}
+            style={{
+              position: "absolute",
+              left: `${pct(planned.s.getTime())}%`,
+              width: `${Math.max(1.2, pct(planned.e.getTime()) - pct(planned.s.getTime()))}%`,
+              top: 6,
+              height: 6,
+              background: "#9ca3af",
+              opacity: 0.55,
+              borderRadius: 3,
+            }}
+          />
+        )}
+        {/* Current (live) — colored bar with progress fill */}
+        <div
+          title={`Current: ${fmt(current.s)} – ${fmt(current.e)} · ${pctDone}% done`}
+          style={{
+            position: "absolute",
+            left: `${cs}%`,
+            width: `${cw}%`,
+            top: 15,
+            height: 16,
+            background: color,
+            opacity: 0.28,
+            borderRadius: 5,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              height: "100%",
+              width: `${pctDone}%`,
+              background: color,
+              opacity: 1,
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Legend({ baselineDate }: { baselineDate: string }) {
+  const item = (node: ReactNode, text: string) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {node}
+      <span>{text}</span>
+    </span>
+  );
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 18,
+        flexWrap: "wrap",
+        fontSize: 11,
+        color: "#4b5563",
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 8,
+        padding: "8px 12px",
+        margin: "0 0 8px",
+      }}
+    >
+      {item(
+        <span style={{ width: 22, height: 6, background: "#9ca3af", opacity: 0.6, borderRadius: 3 }} />,
+        `Planned (baseline, ${baselineDate})`
+      )}
+      {item(
+        <span style={{ width: 22, height: 12, background: "#1F3864", opacity: 0.28, borderRadius: 3 }} />,
+        "Current (live from Linear)"
+      )}
+      {item(
+        <span style={{ width: 22, height: 12, background: "#1F3864", borderRadius: 3 }} />,
+        "% complete"
+      )}
+      {item(<span style={{ width: 2, height: 14, background: "#ef4444" }} />, "Today")}
+      {item(<span style={{ color: "#dc2626", fontWeight: 700 }}>+d</span>, "behind baseline")}
+    </div>
   );
 }
 
@@ -207,7 +365,7 @@ function Section({
 }) {
   const c = color || "#1F3864";
   return (
-    <section style={{ margin: "22px 0" }}>
+    <section style={{ margin: "20px 0" }}>
       <h2
         style={{
           fontSize: 15,
@@ -237,21 +395,23 @@ function Section({
 function Grid({
   weeks,
   pct,
+  todayPct,
   children,
 }: {
   weeks: Date[];
   pct: (t: number) => number;
+  todayPct: number;
   children: ReactNode;
 }) {
   return (
-    <div style={{ minWidth: 780 }}>
+    <div style={{ minWidth: 820 }}>
       <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 4 }}>
         <div style={{ width: LABEL_W, flexShrink: 0 }} />
         <div
           style={{
             position: "relative",
             flex: 1,
-            height: 24,
+            height: 26,
             borderBottom: "1px solid #e5e7eb",
           }}
         >
@@ -273,29 +433,20 @@ function Grid({
               {w.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
             </div>
           ))}
+          <div
+            title="Today"
+            style={{
+              position: "absolute",
+              left: `${todayPct}%`,
+              bottom: 0,
+              height: 22,
+              width: 2,
+              background: "#ef4444",
+            }}
+          />
         </div>
       </div>
       {children}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  sub,
-  children,
-}: {
-  label: string;
-  sub?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", borderTop: "1px solid #f1f2f4" }}>
-      <div style={{ width: LABEL_W, flexShrink: 0, padding: "6px 12px 6px 0" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.25 }}>{label}</div>
-        {sub && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>{sub}</div>}
-      </div>
-      <div style={{ position: "relative", flex: 1, height: 34 }}>{children}</div>
     </div>
   );
 }
