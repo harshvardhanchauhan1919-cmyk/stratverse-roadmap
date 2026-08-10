@@ -317,7 +317,7 @@ export default async function Page() {
         Planned = frozen baseline ({fmt(parse(BASE.frozenOn)!)} 2026). Current = live Linear dates.
         Fill = % complete (from Linear). The drift chip (+3d late) compares dates against the
         baseline and only moves when someone edits a date in Linear. The health chip is days of
-        slack — days left minus the days the remaining work needs at the planned rate — and is
+        pace — days left minus the days the remaining work needs at the planned rate — and is
         suppressed for the first quarter of a row&apos;s window. Edit dates or progress in Linear
         and refresh to update.
       </div>
@@ -449,7 +449,9 @@ function TrackRow({
           )}
           {health && health.expected > 0 && health.expected < 1 && (
             <div
-              title={`~${Math.round(health.expected * 100)}% expected by today`}
+              title={`The fill should reach here today (~${Math.round(
+                health.expected * 100
+              )}% complete at the planned rate)`}
               style={{
                 position: "absolute",
                 left: `${health.expected * 100}%`,
@@ -511,25 +513,25 @@ function Legend({
       {item(<span style={{ width: 2, height: 14, background: "#ef4444" }} />, "Today")}
       {showDrift &&
         item(
-          <span style={{ color: "#dc2626", fontWeight: 700 }}>+3d late</span>,
+          <span style={{ color: "#dc2626", fontWeight: 700 }}>e.g. +3d late</span>,
           "days behind baseline"
         )}
       {showHealth && (
         <>
           {item(
             <span style={{ width: 2, height: 12, background: "rgba(17, 24, 39, 0.55)" }} />,
-            "Expected % by today"
+            "Pace marker — where the fill should be today"
           )}
-          {item(
-            <span style={{ fontWeight: 600 }}>
-              <span style={{ color: "#16a34a" }}>on track</span>
-              <span style={{ color: "#9ca3af" }}> / </span>
-              <span style={{ color: "#d97706" }}>at risk</span>
-              <span style={{ color: "#9ca3af" }}> / </span>
-              <span style={{ color: "#dc2626" }}>behind Nd</span>
-            </span>,
-            "days of slack vs the planned rate"
-          )}
+          <span
+            style={{ fontWeight: 600 }}
+            title="Days ahead of / behind the pace needed to finish on time"
+          >
+            <span style={{ color: "#16a34a" }}>on track</span>
+            <span style={{ color: "#9ca3af" }}> / </span>
+            <span style={{ color: "#d97706" }}>at risk</span>
+            <span style={{ color: "#9ca3af" }}> / </span>
+            <span style={{ color: "#dc2626" }}>behind</span>
+          </span>
         </>
       )}
     </div>
