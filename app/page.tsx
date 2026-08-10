@@ -35,6 +35,21 @@ function norm(v: number | null | undefined): number {
 function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / MS_DAY);
 }
+// Translucent version of a colour WITHOUT using CSS `opacity`.
+// `opacity` on a parent applies to its children too (it creates a group), so a
+// full-strength progress fill inside a 0.28-opacity track ends up at 0.28 as
+// well — i.e. invisible. Baking the alpha into the background colour instead
+// keeps the child fill at full strength.
+function tint(color: string, alpha: number): string {
+  let hex = (color || "").trim();
+  if (hex.startsWith("#")) hex = hex.slice(1);
+  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return color; // named/unknown colour: leave as-is
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export default async function Page() {
   let data: Roadmap | null = null;
@@ -280,8 +295,7 @@ function TrackRow({
               width: `${Math.max(1.2, pct(planned.e.getTime()) - pct(planned.s.getTime()))}%`,
               top: 6,
               height: 6,
-              background: "#6b7280",
-              opacity: 0.85,
+              background: "rgba(107, 114, 128, 0.85)",
               borderRadius: 3,
             }}
           />
@@ -295,23 +309,25 @@ function TrackRow({
             width: `${cw}%`,
             top: 15,
             height: 16,
-            background: color,
-            opacity: 0.28,
+            background: tint(color, 0.28),
             borderRadius: 5,
             overflow: "hidden",
           }}
         >
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              height: "100%",
-              width: `${pctDone}%`,
-              background: color,
-              opacity: 1,
-            }}
-          />
+          {pctDone > 0 && (
+            <div
+              title={`${pctDone}% complete`}
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                height: "100%",
+                width: `${pctDone}%`,
+                minWidth: 2,
+                background: color,
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -341,11 +357,11 @@ function Legend({ baselineDate }: { baselineDate: string }) {
       }}
     >
       {item(
-        <span style={{ width: 22, height: 6, background: "#6b7280", opacity: 0.85, borderRadius: 3 }} />,
+        <span style={{ width: 22, height: 6, background: "rgba(107, 114, 128, 0.85)", borderRadius: 3 }} />,
         `Planned (baseline, ${baselineDate})`
       )}
       {item(
-        <span style={{ width: 22, height: 12, background: "#1F3864", opacity: 0.28, borderRadius: 3 }} />,
+        <span style={{ width: 22, height: 12, background: tint("#1F3864", 0.28), borderRadius: 3 }} />,
         "Current (live from Linear)"
       )}
       {item(
