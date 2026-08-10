@@ -51,10 +51,21 @@ function tint(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// Schedule health: actual % complete vs the % you'd expect given elapsed time.
-// This is deliberately independent of `drift` — drift only moves when someone
-// edits a date in Linear, so on its own it can read "on plan" for a milestone
-// that is due tomorrow at 0%.
+// Schedule health, expressed in DAYS OF SLACK so it shares a unit with the
+// drift chip. Slack = days actually left, minus the days the remaining work
+// would take at the planned rate. Algebraically identical to a progress-vs-
+// elapsed-time gap, just multiplied by the window length.
+//
+// Deliberately independent of `drift`: drift only moves when someone edits a
+// date in Linear, so on its own it reads "on plan" for a milestone due
+// tomorrow at 0%.
+//
+// A grace period suppresses the chip early in a window. Work rarely burns
+// linearly — it lands in a lump near the end — so without this every freshly
+// started row would cry wolf on day one and the signal would be ignored.
+const GRACE_FRACTION = 0.25; // judge nothing until a quarter of the window has gone
+const GRACE_MIN_DAYS = 1;
+
 interface Health {
   label: string;
   color: string;
@@ -62,19 +73,20 @@ interface Health {
   title: string;
 }
 function healthOf(s: Date, e: Date, progress: number, today: Date): Health | null {
-  const total = e.getTime() - s.getTime();
+  const totalDays = daysBetween(s, e);
+  const elapsedDays = daysBetween(s, today);
+  const daysLeft = daysBetween(today, e);
+  const donePct = Math.round(progress * 100);
   const expected =
-    total <= 0
+    totalDays <= 0
       ? today.getTime() >= e.getTime()
         ? 1
         : 0
-      : Math.max(0, Math.min(1, (today.getTime() - s.getTime()) / total));
-
-  const donePct = Math.round(progress * 100);
+      : Math.max(0, Math.min(1, elapsedDays / totalDays));
   const expPct = Math.round(expected * 100);
 
   if (progress >= 1) return { label: "done", color: "#16a34a", expected, title: "Complete" };
-  if (today.getTime() < s.getTime()) return null; // not started yet — nothing to judge
+  if (today.getTime() < s.getTime()) return null; // not started — nothing to judge
   if (today.getTime() > e.getTime())
     return {
       label: `overdue at ${donePct}%`,
@@ -83,11 +95,80 @@ function healthOf(s: Date, e: Date, progress: number, today: Date): Health | nul
       title: `Past target date and only ${donePct}% complete`,
     };
 
-  const gapPts = Math.round((progress - expected) * 100);
-  const title = `${donePct}% complete vs ~${expPct}% expected by today`;
-  if (gapPts < -20) return { label: `behind ${Math.abs(gapPts)}pts`, color: "#dc2626", expected, title };
-  if (gapPts < -5) return { label: "at risk", color: "#d97706", expected, title };
-  return { label: "on track", color: "#16a34a", expected, title };
+  // Grace period.
+  if (elapsedDays < GRACE_MIN_DAYS) return null;
+  if (totalDays > 0 && elapsedDays / totalDays < GRACE_FRACTION) return null;
+
+  const daysNeeded = (1 - progress) * totalDays;
+  const slack = daysLeft - daysNeeded;
+  const behindBy = Math.max(1, Math.round(-slack));
+  const title =
+    `${donePct}% complete vs ~${expPct}% expected by today · ` +
+    `${daysLeft}d left, ~${daysNeeded.toFixed(1)}d of work remaining at the planned rate`;
+
+  if (slack >= -0.5) return { label: "on track", color: "#16a34a", expected, title };
+  // "At risk" band widens with the length of the window: a day of slip means
+  // more on a 5-day milestone than on a 40-day project.
+  const atRiskFloor = -Math.max(2, 0.15 * totalDays);
+  if (slack > atRiskFloor) return { label: "at risk", color: "#d97706", expected, title };
+  return { label: `behind ${behindBy}d`, color: "#dc2626", expected, title };
+}
+
+// ---------------------------------------------------------------------------
+// Row models. Built before render so the legend can ask whether any row
+// actually produces a drift or health chip, and omit keys for signals that
+// aren't on screen.
+// ---------------------------------------------------------------------------
+interface RowModel {
+  id: string;
+  label: string;
+  color: string;
+  planned: { s: Date; e: Date } | null;
+  current: { s: Date; e: Date };
+  progress: number;
+  drift: number;
+}
+
+function projectRow(p: Project): RowModel {
+  const b = BASE.projects[p.id];
+  const curS = parse(p.startDate) || parse(p.targetDate)!;
+  const curE = parse(p.targetDate) || parse(p.startDate)!;
+  const baseS = b ? parse(b.startDate) : null;
+  const baseE = b ? parse(b.targetDate) : null;
+  return {
+    id: p.id,
+    label: p.name,
+    color: p.color,
+    planned: baseS && baseE ? { s: baseS, e: baseE } : null,
+    current: { s: curS, e: curE },
+    progress: norm(p.progress),
+    drift: baseE && curE ? daysBetween(baseE, curE) : 0,
+  };
+}
+
+function milestoneRows(p: Project): RowModel[] {
+  const out: RowModel[] = [];
+  p.milestones.forEach((m, i) => {
+    const curE = parse(m.targetDate);
+    if (!curE) return;
+    const curS =
+      i === 0 ? parse(p.startDate) || curE : parse(p.milestones[i - 1].targetDate) || curE;
+    const baseE = parse(BASE.milestones[m.id]);
+    const baseS =
+      i === 0
+        ? parse(BASE.projects[p.id]?.startDate)
+        : parse(BASE.milestones[p.milestones[i - 1].id]);
+    out.push({
+      id: m.id,
+      label: m.name,
+      color: p.color,
+      planned: baseS && baseE ? { s: baseS, e: baseE } : null,
+      current: { s: curS, e: curE },
+      progress: norm(m.progress),
+      drift: baseE ? daysBetween(baseE, curE) : 0,
+    });
+  });
+  return out;
 }
 
 export default async function Page() {
@@ -154,6 +235,15 @@ export default async function Page() {
   today.setHours(0, 0, 0, 0);
   const todayPct = pct(today.getTime());
 
+  const masterRows = projects.map(projectRow);
+  const perProject = projects.map((p) => ({ project: p, rows: milestoneRows(p) }));
+  const allRows = [...masterRows, ...perProject.flatMap((x) => x.rows)];
+  // Only key a signal in the legend if some row on screen actually shows it.
+  const anyDrift = allRows.some((r) => r.drift !== 0);
+  const anyHealth = allRows.some(
+    (r) => healthOf(r.current.s, r.current.e, r.progress, today) !== null
+  );
+
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 20px 60px" }}>
       <div
@@ -176,82 +266,60 @@ export default async function Page() {
         Overall finish target: {fmt(maxRaw)} 2026
       </div>
 
-      <Legend baselineDate={BASE.frozenOn} />
+      <Legend baselineDate={BASE.frozenOn} showDrift={anyDrift} showHealth={anyHealth} />
 
       <Section title="Master Roadmap">
         <Grid weeks={weeks} pct={pct} todayPct={todayPct}>
-          {projects.map((p) => {
-            const b = BASE.projects[p.id];
-            const curS = parse(p.startDate) || parse(p.targetDate)!;
-            const curE = parse(p.targetDate) || parse(p.startDate)!;
-            const baseS = b ? parse(b.startDate) : null;
-            const baseE = b ? parse(b.targetDate) : null;
-            const drift = baseE && curE ? daysBetween(baseE, curE) : 0;
-            return (
-              <TrackRow
-                key={p.id}
-                label={p.name}
-                color={p.color}
-                planned={baseS && baseE ? { s: baseS, e: baseE } : null}
-                current={{ s: curS, e: curE }}
-                progress={norm(p.progress)}
-                drift={drift}
-                pct={pct}
-                todayPct={todayPct}
-                today={today}
-              />
-            );
-          })}
+          {masterRows.map((r) => (
+            <TrackRow
+              key={r.id}
+              label={r.label}
+              color={r.color}
+              planned={r.planned}
+              current={r.current}
+              progress={r.progress}
+              drift={r.drift}
+              pct={pct}
+              todayPct={todayPct}
+              today={today}
+            />
+          ))}
         </Grid>
       </Section>
 
-      {projects.map((p) => (
+      {perProject.map(({ project: p, rows }) => (
         <Section key={p.id} title={p.name} color={p.color}>
           <Grid weeks={weeks} pct={pct} todayPct={todayPct}>
-            {p.milestones.length === 0 && (
+            {rows.length === 0 && (
               <div style={{ fontSize: 12, color: "#9ca3af", padding: "8px 0" }}>
                 No milestones with dates.
               </div>
             )}
-            {p.milestones.map((m, i) => {
-              const curE = parse(m.targetDate);
-              if (!curE) return null;
-              const curS =
-                i === 0
-                  ? parse(p.startDate) || curE
-                  : parse(p.milestones[i - 1].targetDate) || curE;
-
-              const baseE = parse(BASE.milestones[m.id]);
-              const baseS =
-                i === 0
-                  ? parse(BASE.projects[p.id]?.startDate)
-                  : parse(BASE.milestones[p.milestones[i - 1].id]);
-
-              const drift = baseE ? daysBetween(baseE, curE) : 0;
-              return (
-                <TrackRow
-                  key={m.id}
-                  label={m.name}
-                  color={p.color}
-                  planned={baseS && baseE ? { s: baseS, e: baseE } : null}
-                  current={{ s: curS, e: curE }}
-                  progress={norm(m.progress)}
-                  drift={drift}
-                  pct={pct}
-                  todayPct={todayPct}
-                  today={today}
-                />
-              );
-            })}
+            {rows.map((r) => (
+              <TrackRow
+                key={r.id}
+                label={r.label}
+                color={r.color}
+                planned={r.planned}
+                current={r.current}
+                progress={r.progress}
+                drift={r.drift}
+                pct={pct}
+                todayPct={todayPct}
+                today={today}
+              />
+            ))}
           </Grid>
         </Section>
       ))}
 
       <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 26 }}>
         Planned = frozen baseline ({fmt(parse(BASE.frozenOn)!)} 2026). Current = live Linear dates.
-        Fill = % complete (from Linear). The drift chip (+d) compares dates only; the health chip
-        compares actual progress against elapsed time. Edit dates or progress in Linear and refresh
-        to update.
+        Fill = % complete (from Linear). The drift chip (+3d late) compares dates against the
+        baseline and only moves when someone edits a date in Linear. The health chip is days of
+        slack — days left minus the days the remaining work needs at the planned rate — and is
+        suppressed for the first quarter of a row&apos;s window. Edit dates or progress in Linear
+        and refresh to update.
       </div>
     </main>
   );
@@ -398,7 +466,15 @@ function TrackRow({
   );
 }
 
-function Legend({ baselineDate }: { baselineDate: string }) {
+function Legend({
+  baselineDate,
+  showDrift,
+  showHealth,
+}: {
+  baselineDate: string;
+  showDrift: boolean;
+  showHealth: boolean;
+}) {
   const item = (node: ReactNode, text: string) => (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
       {node}
@@ -433,20 +509,28 @@ function Legend({ baselineDate }: { baselineDate: string }) {
         "% complete"
       )}
       {item(<span style={{ width: 2, height: 14, background: "#ef4444" }} />, "Today")}
-      {item(<span style={{ color: "#dc2626", fontWeight: 700 }}>+d</span>, "behind baseline")}
-      {item(
-        <span style={{ width: 2, height: 12, background: "rgba(17, 24, 39, 0.55)" }} />,
-        "Expected % by today"
-      )}
-      {item(
-        <span style={{ fontWeight: 600 }}>
-          <span style={{ color: "#16a34a" }}>on track</span>
-          <span style={{ color: "#9ca3af" }}> / </span>
-          <span style={{ color: "#d97706" }}>at risk</span>
-          <span style={{ color: "#9ca3af" }}> / </span>
-          <span style={{ color: "#dc2626" }}>behind</span>
-        </span>,
-        "progress vs elapsed time"
+      {showDrift &&
+        item(
+          <span style={{ color: "#dc2626", fontWeight: 700 }}>+3d late</span>,
+          "days behind baseline"
+        )}
+      {showHealth && (
+        <>
+          {item(
+            <span style={{ width: 2, height: 12, background: "rgba(17, 24, 39, 0.55)" }} />,
+            "Expected % by today"
+          )}
+          {item(
+            <span style={{ fontWeight: 600 }}>
+              <span style={{ color: "#16a34a" }}>on track</span>
+              <span style={{ color: "#9ca3af" }}> / </span>
+              <span style={{ color: "#d97706" }}>at risk</span>
+              <span style={{ color: "#9ca3af" }}> / </span>
+              <span style={{ color: "#dc2626" }}>behind Nd</span>
+            </span>,
+            "days of slack vs the planned rate"
+          )}
+        </>
       )}
     </div>
   );
