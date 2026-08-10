@@ -51,6 +51,45 @@ function tint(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// Schedule health: actual % complete vs the % you'd expect given elapsed time.
+// This is deliberately independent of `drift` — drift only moves when someone
+// edits a date in Linear, so on its own it can read "on plan" for a milestone
+// that is due tomorrow at 0%.
+interface Health {
+  label: string;
+  color: string;
+  expected: number; // 0..1 — share of the window elapsed as of today
+  title: string;
+}
+function healthOf(s: Date, e: Date, progress: number, today: Date): Health | null {
+  const total = e.getTime() - s.getTime();
+  const expected =
+    total <= 0
+      ? today.getTime() >= e.getTime()
+        ? 1
+        : 0
+      : Math.max(0, Math.min(1, (today.getTime() - s.getTime()) / total));
+
+  const donePct = Math.round(progress * 100);
+  const expPct = Math.round(expected * 100);
+
+  if (progress >= 1) return { label: "done", color: "#16a34a", expected, title: "Complete" };
+  if (today.getTime() < s.getTime()) return null; // not started yet — nothing to judge
+  if (today.getTime() > e.getTime())
+    return {
+      label: `overdue at ${donePct}%`,
+      color: "#b91c1c",
+      expected,
+      title: `Past target date and only ${donePct}% complete`,
+    };
+
+  const gapPts = Math.round((progress - expected) * 100);
+  const title = `${donePct}% complete vs ~${expPct}% expected by today`;
+  if (gapPts < -20) return { label: `behind ${Math.abs(gapPts)}pts`, color: "#dc2626", expected, title };
+  if (gapPts < -5) return { label: "at risk", color: "#d97706", expected, title };
+  return { label: "on track", color: "#16a34a", expected, title };
+}
+
 export default async function Page() {
   let data: Roadmap | null = null;
   let error: string | null = null;
@@ -159,6 +198,7 @@ export default async function Page() {
                 drift={drift}
                 pct={pct}
                 todayPct={todayPct}
+                today={today}
               />
             );
           })}
@@ -199,6 +239,7 @@ export default async function Page() {
                   drift={drift}
                   pct={pct}
                   todayPct={todayPct}
+                  today={today}
                 />
               );
             })}
@@ -208,7 +249,9 @@ export default async function Page() {
 
       <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 26 }}>
         Planned = frozen baseline ({fmt(parse(BASE.frozenOn)!)} 2026). Current = live Linear dates.
-        Fill = % complete (from Linear). Edit dates or progress in Linear and refresh to update.
+        Fill = % complete (from Linear). The drift chip (+d) compares dates only; the health chip
+        compares actual progress against elapsed time. Edit dates or progress in Linear and refresh
+        to update.
       </div>
     </main>
   );
@@ -233,6 +276,7 @@ function TrackRow({
   drift,
   pct,
   todayPct,
+  today,
 }: {
   label: string;
   color: string;
@@ -242,11 +286,13 @@ function TrackRow({
   drift: number;
   pct: (t: number) => number;
   todayPct: number;
+  today: Date;
 }) {
   const cs = pct(current.s.getTime());
   const cw = Math.max(1.2, pct(current.e.getTime()) - cs);
   const pctDone = Math.round(progress * 100);
   const totalDays = daysBetween(current.s, current.e);
+  const health = healthOf(current.s, current.e, progress, today);
   return (
     <div style={{ display: "flex", alignItems: "center", borderTop: "1px solid #f1f2f4" }}>
       <div style={{ width: LABEL_W, flexShrink: 0, padding: "5px 12px 5px 0" }}>
@@ -268,6 +314,11 @@ function TrackRow({
           <span style={{ color: "#374151" }}>{totalDays}d</span>
           <span style={{ color: "#111827", fontWeight: 600 }}>{pctDone}%</span>
           <DriftChip drift={drift} />
+          {health && (
+            <span style={{ color: health.color, fontWeight: 600 }} title={health.title}>
+              {health.label}
+            </span>
+          )}
         </div>
       </div>
       <div style={{ position: "relative", flex: 1, height: ROW_H }}>
@@ -328,6 +379,19 @@ function TrackRow({
               }}
             />
           )}
+          {health && health.expected > 0 && health.expected < 1 && (
+            <div
+              title={`~${Math.round(health.expected * 100)}% expected by today`}
+              style={{
+                position: "absolute",
+                left: `${health.expected * 100}%`,
+                top: 0,
+                height: "100%",
+                width: 2,
+                background: "rgba(17, 24, 39, 0.55)",
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -370,6 +434,20 @@ function Legend({ baselineDate }: { baselineDate: string }) {
       )}
       {item(<span style={{ width: 2, height: 14, background: "#ef4444" }} />, "Today")}
       {item(<span style={{ color: "#dc2626", fontWeight: 700 }}>+d</span>, "behind baseline")}
+      {item(
+        <span style={{ width: 2, height: 12, background: "rgba(17, 24, 39, 0.55)" }} />,
+        "Expected % by today"
+      )}
+      {item(
+        <span style={{ fontWeight: 600 }}>
+          <span style={{ color: "#16a34a" }}>on track</span>
+          <span style={{ color: "#9ca3af" }}> / </span>
+          <span style={{ color: "#d97706" }}>at risk</span>
+          <span style={{ color: "#9ca3af" }}> / </span>
+          <span style={{ color: "#dc2626" }}>behind</span>
+        </span>,
+        "progress vs elapsed time"
+      )}
     </div>
   );
 }
